@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  default: all
+  disable:
+    # Deprecated linters.
+    - gomodguard
+    - wsl
+    # Requires project-specific policy/config to be meaningful; not worth the upkeep here.
+    - depguard
+    - exhaustruct
