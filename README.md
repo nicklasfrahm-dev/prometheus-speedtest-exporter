@@ -6,8 +6,50 @@ This is a prometheus speedtest exporter written purely in [Golang][golang]. It u
 
 ```bash
 ./bin/prometheus-speedtest-exporter
-inf: prometheus-speedtest-exporter: v0.1.0
-inf: starting server: http://0.0.0.0:9516
+{"time":"2026-07-02T20:00:14+02:00","level":"INFO","msg":"Starting application","application":"prometheus-speedtest-exporter","version":"v0.1.0"}
+{"time":"2026-07-02T20:00:14+02:00","level":"INFO","msg":"Starting server","address":"http://0.0.0.0:9516"}
+```
+
+A container image is published on every release:
+
+```bash
+docker run --rm -p 9516:9516 ghcr.io/nicklasfrahm/prometheus-speedtest-exporter:latest
+```
+
+### Configuration
+
+| Environment variable | Default | Supported values                    | Description                                     |
+| --------------------- | ------- | ------------------------------------ | ------------------------------------------------ |
+| `PORT`                | `9516`  | any valid port                       | Port the HTTP server listens on                  |
+| `LOG_LEVEL`           | `warn`  | `debug`, `info`, `warn`/`warning`, `error` (case insensitive) | Minimum log level emitted |
+| `LOG_FORMAT`          | `json`  | `json`, `console`/`text` (case insensitive) | Log output format; `console`/`text` renders color-coded levels via [tint][tint] |
+
+### Sample metrics
+
+Every scrape of `/metrics` triggers a real speedtest, so expect the request to take 20-30s:
+
+```text
+# HELP speedtest_download_speed_bps Download speed (bit/s)
+# TYPE speedtest_download_speed_bps gauge
+speedtest_download_speed_bps 1.34576e+07
+# HELP speedtest_jitter_seconds Jitter (seconds)
+# TYPE speedtest_jitter_seconds gauge
+speedtest_jitter_seconds 0.012366775
+# HELP speedtest_ping_seconds Latency (seconds)
+# TYPE speedtest_ping_seconds gauge
+speedtest_ping_seconds 0.063418353
+# HELP speedtest_result_valid Indicates if the result is logical given UL and DL speed
+# TYPE speedtest_result_valid gauge
+speedtest_result_valid 1
+# HELP speedtest_test_duration_seconds Duration of the test (seconds)
+# TYPE speedtest_test_duration_seconds gauge
+speedtest_test_duration_seconds 23.27538563
+# HELP speedtest_up Indicates if the last speedtest was successful
+# TYPE speedtest_up gauge
+speedtest_up 1
+# HELP speedtest_upload_speed_bps Upload speed (bit/s)
+# TYPE speedtest_upload_speed_bps gauge
+speedtest_upload_speed_bps 2.9622e+06
 ```
 
 ### Prometheus configuration
@@ -23,15 +65,24 @@ scrape_configs:
           - localhost:9516
 ```
 
+## Releases
+
+Releases are fully automated via [semantic-release][semantic-release] based on [Conventional Commits][conventional-commits]. On every push to `main`, [`.github/workflows/release.yml`](.github/workflows/release.yml):
+
+1. Determines the next version from commit messages and, if a release is warranted, creates a Git tag and GitHub release.
+2. Builds and pushes a multi-arch (`linux/amd64`, `linux/arm64`) container image to `ghcr.io`, tagged `latest` and with the release version.
+
 ## Related projects
 
 Why another prometheus speedtest exporter? The container image is less than `10MB` in size! I am planning to use this exporter for Kubernetes at the network edge, hence every MB counts.
 
 - [jeanralphaviles/prometheus_speedtest (Python)](https://github.com/jeanralphaviles/prometheus_speedtest)
 - [billimek/prometheus-speedtest-exporter (Shell)](https://github.com/billimek/prometheus-speedtest-exporter)
+- [danopstech/speedtest_exporter (Python)](https://github.com/danopstech/speedtest_exporter)
 
 ## License
 
 This project is licensed under the terms of the [MIT license](./LICENSE.md).
 
 [golang]: https://go.dev/
+[tint]: https://github.com/lmittmann/tint
