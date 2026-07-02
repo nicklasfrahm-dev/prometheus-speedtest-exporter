@@ -100,11 +100,15 @@ func TestAppRecordResults(t *testing.T) {
 		prometheusHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
 	}
 
+	// speedtest.ByteRate is bytes/s; Mbps() divides by 125000, so multiply
+	// back to construct a fixture in Mbps.
+	const bytesPerSecondPerMbps = 125000
+
 	target := &speedtest.Server{
 		Latency: 50 * time.Millisecond,
 		Jitter:  5 * time.Millisecond,
-		DLSpeed: 100,
-		ULSpeed: 20,
+		DLSpeed: 100 * bytesPerSecondPerMbps,
+		ULSpeed: 20 * bytesPerSecondPerMbps,
 	}
 
 	application.recordResults(target, 2*time.Second)
