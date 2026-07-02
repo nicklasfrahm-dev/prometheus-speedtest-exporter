@@ -36,6 +36,7 @@ jobs:
 
   containerize:
     name: Containerize
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -56,11 +57,13 @@ jobs:
           context: .
           file: Containerfile
           push: false
+          cache-from: type=gha
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
   lint:
     name: Lint
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read

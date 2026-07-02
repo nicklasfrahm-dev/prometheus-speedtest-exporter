@@ -148,12 +148,7 @@ type app struct {
 // findNearestServer resolves the speedtest.net server with the lowest
 // network distance to the current host.
 func findNearestServer(client *speedtest.Speedtest) (*speedtest.Server, error) {
-	userInfo, err := client.FetchUserInfo()
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch user info: %w", err)
-	}
-
-	serverList, err := client.FetchServers(userInfo)
+	serverList, err := client.FetchServers()
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch server list: %w", err)
 	}
@@ -185,8 +180,8 @@ func findNearestServer(client *speedtest.Speedtest) (*speedtest.Server, error) {
 func (a *app) recordResults(target *speedtest.Server, elapsed time.Duration) {
 	a.metrics.ping.Set(target.Latency.Seconds())
 	a.metrics.jitter.Set(target.Jitter.Seconds())
-	a.metrics.downloadSpeed.Set(target.DLSpeed * mbpsToBps)
-	a.metrics.uploadSpeed.Set(target.ULSpeed * mbpsToBps)
+	a.metrics.downloadSpeed.Set(target.DLSpeed.Mbps() * mbpsToBps)
+	a.metrics.uploadSpeed.Set(target.ULSpeed.Mbps() * mbpsToBps)
 
 	if target.CheckResultValid() {
 		a.metrics.resultValid.Set(1)
@@ -219,7 +214,7 @@ func (a *app) handleMetrics(writer http.ResponseWriter, request *http.Request) {
 
 	start := time.Now()
 
-	err = target.PingTest()
+	err = target.PingTest(nil)
 	if err != nil {
 		fail(fmt.Errorf("failed to run ping test: %w", err))
 
