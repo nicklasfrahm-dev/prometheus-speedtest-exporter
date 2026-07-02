@@ -7,6 +7,7 @@ on:
 
 jobs:
   release:
+    name: Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -65,6 +66,7 @@ jobs:
             semantic-release
 
   containerize:
+    name: Containerize
     needs: release
     if: needs.release.outputs.published == 'true'
     runs-on: ubuntu-latest

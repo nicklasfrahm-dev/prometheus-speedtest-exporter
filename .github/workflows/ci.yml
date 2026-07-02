@@ -5,9 +5,37 @@ on:
     branches:
       - main
   pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
 
 jobs:
-  build:
+  check-pr-title:
+    name: Check PR title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title follows Conventional Commits
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          REGEX: '^(feat|fix)(\([a-zA-Z-]+\))?!?: [a-z].*'
+        run: |
+          echo "$TITLE" | grep -qP "$REGEX" || {
+            echo "PR title does not match the required pattern: $REGEX"
+            echo "Title: $TITLE"
+            echo ""
+            echo "Common gotchas:"
+            echo "  - type must be exactly 'feat' or 'fix' (no 'chore', 'docs', 'ci', etc.)"
+            echo "  - scope (optional, in parentheses) must be alphabetic characters and hyphens only, no digits/underscores/slashes/spaces"
+            echo "  - exactly one space after the colon"
+            echo "  - description must start with a lowercase letter"
+            exit 1
+          }
+
+  containerize:
+    name: Containerize
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,6 +60,7 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
 
   lint:
+    name: Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,10 +73,17 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Read golangci-lint version
+        id: golangci-lint-version
+        run: echo "version=$(grep -oP 'GOLANGCI_LINT_VERSION\s*:=\s*\K\S+' Makefile)" >> "$GITHUB_OUTPUT"
+
       - name: Lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ steps.golangci-lint-version.outputs.version }}
 
   coverage:
+    name: Test coverage
     runs-on: ubuntu-latest
     permissions:
       contents: write
