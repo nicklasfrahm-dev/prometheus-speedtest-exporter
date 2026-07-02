@@ -1,8 +1,9 @@
 module github.com/nicklasfrahm/prometheus-speedtest-exporter
 
-go 1.20
+go 1.26
 
 require (
+	github.com/lmittmann/tint v1.1.3
 	github.com/prometheus/client_golang v1.14.0
 	github.com/showwin/speedtest-go v1.5.2
 )
