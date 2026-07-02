@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      published: ${{ steps.release.outputs.published }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+
+      - name: Resolve npm package versions
+        id: versions
+        run: |
+          # Only ever install npm releases that have had at least 15 days to
+          # be caught by the community/be pulled in case of a supply chain
+          # compromise.
+          cutoff="$(date -u -d '15 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+
+          resolve() {
+            npm view "$1" time --json \
+              | jq -r --arg cutoff "$cutoff" '
+                  to_entries
+                  | map(select(.key != "created" and .key != "modified"))
+                  | map(select(.value <= $cutoff))
+                  | sort_by(.value)
+                  | last.key
+                '
+          }
+
+          {
+            echo "semantic-release=$(resolve semantic-release)"
+            echo "commit-analyzer=$(resolve @semantic-release/commit-analyzer)"
+            echo "release-notes-generator=$(resolve @semantic-release/release-notes-generator)"
+            echo "github=$(resolve @semantic-release/github)"
+            echo "exec=$(resolve @semantic-release/exec)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx --yes \
+            -p semantic-release@${{ steps.versions.outputs.semantic-release }} \
+            -p @semantic-release/commit-analyzer@${{ steps.versions.outputs.commit-analyzer }} \
+            -p @semantic-release/release-notes-generator@${{ steps.versions.outputs.release-notes-generator }} \
+            -p @semantic-release/github@${{ steps.versions.outputs.github }} \
+            -p @semantic-release/exec@${{ steps.versions.outputs.exec }} \
+            semantic-release
+
+  containerize:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/nicklasfrahm/prometheus-speedtest-exporter
+          tags: |
+            type=raw,value=latest
+            type=raw,value=v${{ needs.release.outputs.version }}
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Containerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=v${{ needs.release.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
