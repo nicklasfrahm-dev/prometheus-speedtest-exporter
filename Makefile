@@ -34,6 +34,10 @@ $(GOLANGCI_LINT):
 lint: $(GOLANGCI_LINT) ## Run the linter
 	$(GOLANGCI_LINT) run
 
+.PHONY: test
+test: ## Run the test suite
+	go test -race ./...
+
 .PHONY: container
 container: ## Build the container image for PLATFORMS (default: linux/amd64,linux/arm64)
 	docker buildx build \
