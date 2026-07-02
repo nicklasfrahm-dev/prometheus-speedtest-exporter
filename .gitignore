@@ -1,2 +1,5 @@
 # Ignore built binaries.
 bin/
+
+# Local Claude Code settings.
+.claude/
