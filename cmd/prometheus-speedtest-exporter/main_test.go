@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +17,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var errStubSpeedtestFailure = errors.New("stub speedtest failure")
 
 func TestParseLogLevel(t *testing.T) {
 	t.Parallel()
@@ -76,18 +81,121 @@ func TestNewMetrics(t *testing.T) {
 	}, names)
 }
 
-func TestAppHandleHealthz(t *testing.T) {
+func TestAppHandleLivez(t *testing.T) {
 	t.Parallel()
 
 	application := &app{logger: slog.New(slog.DiscardHandler)}
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/livez", nil)
 
-	application.handleHealthz(recorder, request)
+	application.handleLivez(recorder, request)
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, http.StatusText(http.StatusOK), recorder.Body.String())
+}
+
+func TestAppHandleReadyz(t *testing.T) {
+	t.Parallel()
+
+	application := &app{logger: slog.New(slog.DiscardHandler)}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/readyz", nil)
+
+	application.handleReadyz(recorder, request)
+
+	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	assert.Equal(t, http.StatusText(http.StatusServiceUnavailable), recorder.Body.String())
+
+	application.mu.Lock()
+	application.lastRun = time.Now()
+	application.mu.Unlock()
+
+	recorder = httptest.NewRecorder()
+	application.handleReadyz(recorder, request)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, http.StatusText(http.StatusOK), recorder.Body.String())
+}
+
+// TestParseDurationEnv cannot run in parallel: t.Setenv panics when called
+// from a parallel test.
+func TestParseDurationEnv(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+
+	const fallback = 42 * time.Second
+
+	cases := map[string]struct {
+		raw  string
+		want time.Duration
+	}{
+		"unset":   {raw: "", want: fallback},
+		"valid":   {raw: "90s", want: 90 * time.Second},
+		"invalid": {raw: "not-a-duration", want: fallback},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			const envVar = "TEST_PARSE_DURATION_ENV"
+
+			t.Setenv(envVar, testCase.raw)
+
+			assert.Equal(t, testCase.want, parseDurationEnv(logger, envVar, fallback))
+		})
+	}
+}
+
+func TestAppTriggerRevalidationSkipsWhenFresh(t *testing.T) {
+	t.Parallel()
+
+	reg := prometheus.NewRegistry()
+	application := &app{
+		logger:         slog.New(slog.DiscardHandler),
+		metrics:        NewMetrics(reg),
+		scrapeInterval: time.Hour,
+		lastRun:        time.Now(),
+	}
+
+	application.triggerRevalidation()
+
+	application.mu.RLock()
+	defer application.mu.RUnlock()
+
+	assert.False(t, application.revalidating, "must not start a revalidation while the cache is still fresh")
+}
+
+func TestAppTriggerRevalidationRunsWhenStale(t *testing.T) {
+	t.Parallel()
+
+	reg := prometheus.NewRegistry()
+
+	var calls atomic.Int32
+
+	application := &app{
+		logger:            slog.New(slog.DiscardHandler),
+		metrics:           NewMetrics(reg),
+		prometheusHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
+		scrapeInterval:    time.Millisecond,
+		scrapeTimeout:     time.Second,
+		baseCtx:           t.Context(),
+		runSpeedtest: func(_ context.Context) (*speedtest.Server, time.Duration, error) {
+			calls.Add(1)
+
+			return nil, 0, errStubSpeedtestFailure
+		},
+	}
+
+	application.triggerRevalidation()
+
+	require.Eventually(t, func() bool {
+		application.mu.RLock()
+		defer application.mu.RUnlock()
+
+		return !application.lastRun.IsZero() && !application.revalidating
+	}, 5*time.Second, 10*time.Millisecond, "revalidate() should complete and refresh lastRun")
+
+	assert.Equal(t, int32(1), calls.Load(), "triggerRevalidation must spawn exactly one revalidate() run")
 }
 
 func TestAppRecordResults(t *testing.T) {
