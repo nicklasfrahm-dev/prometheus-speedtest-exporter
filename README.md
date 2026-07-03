@@ -23,10 +23,23 @@ docker run --rm -p 9516:9516 ghcr.io/nicklasfrahm/prometheus-speedtest-exporter:
 | `PORT`                | `9516`  | any valid port                       | Port the HTTP server listens on                  |
 | `LOG_LEVEL`           | `warn`  | `debug`, `info`, `warn`/`warning`, `error` (case insensitive) | Minimum log level emitted |
 | `LOG_FORMAT`          | `json`  | `json`, `console`/`text` (case insensitive) | Log output format; `console`/`text` renders color-coded levels via [tint][tint] |
+| `SCRAPE_INTERVAL`     | `1h`    | any [`time.ParseDuration`][go-duration] value | Minimum time between real speedtests; scrapes within this window are served from cache |
+| `SCRAPE_TIMEOUT`      | `5m`    | any [`time.ParseDuration`][go-duration] value | Maximum time a single speedtest is allowed to run before it's cancelled |
+
+### Caching
+
+`/metrics` always responds immediately from a cache. The first scrape after the cache turns older than `SCRAPE_INTERVAL` triggers a new speedtest in the background (stale-while-revalidate); that scrape, and every one after it until the new result lands, still gets the last known values. This decouples how often your scraper polls `/metrics` from how often a real speedtest actually runs, so a short Prometheus/Alloy `scrape_interval` no longer triggers redundant tests or timeouts.
+
+### Health checks
+
+| Endpoint  | Meaning                                                                 |
+| --------- | ------------------------------------------------------------------------ |
+| `/livez`  | Process is up and serving requests                                       |
+| `/readyz` | The cache holds at least one completed speedtest attempt (success or failure) |
 
 ### Sample metrics
 
-Every scrape of `/metrics` triggers a real speedtest, so expect the request to take 20-30s:
+The first scrape after startup (or after the cache goes stale) triggers a real speedtest in the background; that test typically takes 20-30s to complete, after which `/metrics` reflects the new result:
 
 ```text
 # HELP speedtest_download_speed_bps Download speed (bit/s)
@@ -54,12 +67,14 @@ speedtest_upload_speed_bps 2.9622e+06
 
 ### Prometheus configuration
 
+Since `/metrics` now always serves from cache, `scrape_interval`/`scrape_timeout` only need to cover the HTTP round trip, not a full speedtest:
+
 ```yaml
 scrape_configs:
   - job_name: speedtest
     metrics_path: /metrics
-    scrape_interval: 5m
-    scrape_timeout: 60s
+    scrape_interval: 30s
+    scrape_timeout: 10s
     static_configs:
       - targets:
           - localhost:9516
@@ -86,3 +101,6 @@ This project is licensed under the terms of the [MIT license](./LICENSE.md).
 
 [golang]: https://go.dev/
 [tint]: https://github.com/lmittmann/tint
+[go-duration]: https://pkg.go.dev/time#ParseDuration
+[semantic-release]: https://github.com/semantic-release/semantic-release
+[conventional-commits]: https://www.conventionalcommits.org/
