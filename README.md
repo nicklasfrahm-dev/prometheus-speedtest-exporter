@@ -102,3 +102,5 @@ This project is licensed under the terms of the [MIT license](./LICENSE.md).
 [golang]: https://go.dev/
 [tint]: https://github.com/lmittmann/tint
 [go-duration]: https://pkg.go.dev/time#ParseDuration
+[semantic-release]: https://github.com/semantic-release/semantic-release
+[conventional-commits]: https://www.conventionalcommits.org/
