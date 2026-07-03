@@ -24,7 +24,7 @@ build: $(BINARY) ## Build the binary
 
 $(BINARY): $(SOURCES)
 	@mkdir -p $(@D)
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build $(BUILD_FLAGS) -o $(BINARY) cmd/prometheus-speedtest-exporter/main.go
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build $(BUILD_FLAGS) -o $(BINARY) ./cmd/prometheus-speedtest-exporter
 
 $(GOLANGCI_LINT):
 	@mkdir -p $(@D)
