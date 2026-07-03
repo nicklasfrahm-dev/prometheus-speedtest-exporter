@@ -146,26 +146,7 @@ func TestParseDurationEnv(t *testing.T) {
 	}
 }
 
-func TestAppTriggerRevalidationSkipsWhenFresh(t *testing.T) {
-	t.Parallel()
-
-	reg := prometheus.NewRegistry()
-	application := &app{
-		logger:         slog.New(slog.DiscardHandler),
-		metrics:        NewMetrics(reg),
-		scrapeInterval: time.Hour,
-		lastRun:        time.Now(),
-	}
-
-	application.triggerRevalidation()
-
-	application.mu.RLock()
-	defer application.mu.RUnlock()
-
-	assert.False(t, application.revalidating, "must not start a revalidation while the cache is still fresh")
-}
-
-func TestAppTriggerRevalidationRunsWhenStale(t *testing.T) {
+func TestAppRevalidate(t *testing.T) {
 	t.Parallel()
 
 	reg := prometheus.NewRegistry()
@@ -176,9 +157,7 @@ func TestAppTriggerRevalidationRunsWhenStale(t *testing.T) {
 		logger:            slog.New(slog.DiscardHandler),
 		metrics:           NewMetrics(reg),
 		prometheusHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
-		scrapeInterval:    time.Millisecond,
 		scrapeTimeout:     time.Second,
-		baseCtx:           t.Context(),
 		runSpeedtest: func(_ context.Context) (*speedtest.Server, time.Duration, error) {
 			calls.Add(1)
 
@@ -186,16 +165,62 @@ func TestAppTriggerRevalidationRunsWhenStale(t *testing.T) {
 		},
 	}
 
-	application.triggerRevalidation()
+	application.revalidate(t.Context())
+
+	application.mu.RLock()
+	defer application.mu.RUnlock()
+
+	assert.False(t, application.lastRun.IsZero(), "revalidate must refresh lastRun")
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+// TestAppRunRevalidatesPeriodically exercises the background loop that
+// replaced request-triggered revalidation: previously the cache only ever
+// refreshed inside handleMetrics, so /readyz could never turn healthy until
+// something scraped /metrics — a startup deadlock if traffic to /metrics is
+// itself gated on readiness. run() must populate the cache on its own,
+// independent of any request, and keep refreshing on a ticker until its
+// context is canceled.
+func TestAppRunRevalidatesPeriodically(t *testing.T) {
+	t.Parallel()
+
+	reg := prometheus.NewRegistry()
+
+	var calls atomic.Int32
+
+	application := &app{
+		logger:            slog.New(slog.DiscardHandler),
+		metrics:           NewMetrics(reg),
+		prometheusHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
+		scrapeInterval:    10 * time.Millisecond,
+		scrapeTimeout:     time.Second,
+		runSpeedtest: func(_ context.Context) (*speedtest.Server, time.Duration, error) {
+			calls.Add(1)
+
+			return nil, 0, errStubSpeedtestFailure
+		},
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	done := make(chan struct{})
+
+	go func() {
+		application.run(ctx)
+		close(done)
+	}()
 
 	require.Eventually(t, func() bool {
-		application.mu.RLock()
-		defer application.mu.RUnlock()
+		return calls.Load() >= 3
+	}, 5*time.Second, 10*time.Millisecond, "run must revalidate immediately and then on a ticker")
 
-		return !application.lastRun.IsZero() && !application.revalidating
-	}, 5*time.Second, 10*time.Millisecond, "revalidate() should complete and refresh lastRun")
+	cancel()
 
-	assert.Equal(t, int32(1), calls.Load(), "triggerRevalidation must spawn exactly one revalidate() run")
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not stop after context cancellation")
+	}
 }
 
 func TestAppRecordResults(t *testing.T) {

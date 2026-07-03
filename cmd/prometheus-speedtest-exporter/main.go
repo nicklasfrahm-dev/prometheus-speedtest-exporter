@@ -66,7 +66,6 @@ func main() {
 		prometheusHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
 		scrapeInterval:    scrapeInterval,
 		scrapeTimeout:     scrapeTimeout,
-		baseCtx:           baseCtx,
 		runSpeedtest:      runFullSpeedtest,
 	}
 
@@ -82,6 +81,8 @@ func main() {
 	}
 
 	logger.Info("Starting application", "application", "prometheus-speedtest-exporter", "version", version)
+
+	go application.run(baseCtx)
 
 	go func() {
 		logger.Info("Starting server", "address", "http://0.0.0.0"+port)
