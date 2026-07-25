@@ -17,7 +17,7 @@ func newLogger() *slog.Logger {
 
 	switch strings.ToLower(os.Getenv("LOG_FORMAT")) {
 	case "console", "text":
-		handler = tint.NewHandler(os.Stdout, &tint.Options{Level: opts.Level})
+		handler = tint.NewTextHandler(os.Stdout, &tint.Options{Level: opts.Level})
 	default: // "json" and anything unrecognized default to JSON.
 		handler = slog.NewJSONHandler(os.Stdout, opts)
 	}
