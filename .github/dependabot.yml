@@ -4,6 +4,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 15
     commit-message:
       prefix: "fix(deps)"
     groups:
@@ -15,6 +17,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 15
     commit-message:
       prefix: "fix(deps)"
     groups:
