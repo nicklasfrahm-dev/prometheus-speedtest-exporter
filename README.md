@@ -13,7 +13,7 @@ This is a prometheus speedtest exporter written purely in [Golang][golang]. It u
 A container image is published on every release:
 
 ```bash
-docker run --rm -p 9516:9516 ghcr.io/nicklasfrahm/prometheus-speedtest-exporter:latest
+docker run --rm -p 9516:9516 ghcr.io/nicklasfrahm-dev/prometheus-speedtest-exporter:latest
 ```
 
 ### Configuration

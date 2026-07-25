@@ -1,4 +1,4 @@
-module github.com/nicklasfrahm/prometheus-speedtest-exporter
+module github.com/nicklasfrahm-dev/prometheus-speedtest-exporter
 
 go 1.26
 
