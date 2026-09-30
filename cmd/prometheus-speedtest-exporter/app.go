@@ -7,10 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/showwin/speedtest-go/speedtest"
+	"github.com/nicklasfrahm-dev/prometheus-speedtest-exporter/pkg/speedtest"
 )
-
-const mbpsToBps = 1e6
 
 // app holds the dependencies shared by the HTTP handlers, plus the cache
 // state guarded by mu. The cache is kept fresh by a background revalidation
@@ -26,7 +24,7 @@ type app struct {
 	// runSpeedtest executes a full speedtest, observing ctx for cancellation.
 	// Overridable in tests so revalidation logic can be exercised without
 	// hitting the real network.
-	runSpeedtest func(ctx context.Context) (*speedtest.Server, time.Duration, error)
+	runSpeedtest func(ctx context.Context) (*speedtest.Result, error)
 
 	mu      sync.RWMutex
 	lastRun time.Time
@@ -58,7 +56,7 @@ func (a *app) revalidate(ctx context.Context) {
 	runCtx, cancel := context.WithTimeout(ctx, a.scrapeTimeout)
 	defer cancel()
 
-	target, elapsed, err := a.runSpeedtest(runCtx)
+	result, err := a.runSpeedtest(runCtx)
 
 	a.mu.Lock()
 	a.lastRun = time.Now()
@@ -70,23 +68,23 @@ func (a *app) revalidate(ctx context.Context) {
 		return
 	}
 
-	a.recordResults(target, elapsed)
+	a.recordResults(result)
 }
 
 // recordResults writes a completed speedtest's results into the gauges.
-func (a *app) recordResults(target *speedtest.Server, elapsed time.Duration) {
-	a.metrics.ping.Set(target.Latency.Seconds())
-	a.metrics.jitter.Set(target.Jitter.Seconds())
-	a.metrics.downloadSpeed.Set(target.DLSpeed.Mbps() * mbpsToBps)
-	a.metrics.uploadSpeed.Set(target.ULSpeed.Mbps() * mbpsToBps)
+func (a *app) recordResults(result *speedtest.Result) {
+	a.metrics.ping.Set(result.Latency.Mean.Seconds())
+	a.metrics.jitter.Set(result.Latency.Jitter.Seconds())
+	a.metrics.downloadSpeed.Set(result.Download.BitsPerSecond)
+	a.metrics.uploadSpeed.Set(result.Upload.BitsPerSecond)
 
-	if target.CheckResultValid() {
+	if result.Valid() {
 		a.metrics.resultValid.Set(1)
 	} else {
 		a.metrics.resultValid.Set(0)
 	}
 
-	a.metrics.testDuration.Set(elapsed.Seconds())
+	a.metrics.testDuration.Set(result.Duration.Seconds())
 	a.metrics.up.Set(1)
 }
 

@@ -3,8 +3,9 @@ linters:
   default: all
   disable:
     # Deprecated linters.
+    - exhaustruct
     - gomodguard
     - wsl
     # Requires project-specific policy/config to be meaningful; not worth the upkeep here.
     - depguard
-    - exhaustruct
+    - exhaustruct_v5

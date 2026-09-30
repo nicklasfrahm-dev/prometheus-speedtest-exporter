@@ -10,7 +10,7 @@ PLATFORMS	?= linux/amd64,linux/arm64
 
 BINARY		?= bin/prometheus-speedtest-exporter
 
-GOLANGCI_LINT_VERSION	:= v2.12.2
+GOLANGCI_LINT_VERSION	:= v2.14.0
 GOLANGCI_LINT		:= bin/golangci-lint
 
 .DEFAULT_GOAL := help

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nicklasfrahm-dev/prometheus-speedtest-exporter/pkg/speedtest"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/client_golang/prometheus/testutil"
-	"github.com/showwin/speedtest-go/speedtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -146,6 +146,98 @@ func TestParseDurationEnv(t *testing.T) {
 	}
 }
 
+// TestParseIntEnv cannot run in parallel: t.Setenv panics when called from
+// a parallel test.
+func TestParseIntEnv(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+
+	const fallback = 42
+
+	cases := map[string]struct {
+		raw  string
+		want int
+	}{
+		"empty":        {raw: "", want: fallback},
+		"positive":     {raw: "16", want: 16},
+		"negative":     {raw: "-1", want: -1},
+		"not a number": {raw: "many", want: fallback},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			const envVar = "TEST_PARSE_INT_ENV"
+
+			t.Setenv(envVar, testCase.raw)
+
+			assert.Equal(t, testCase.want, parseIntEnv(logger, envVar, fallback))
+		})
+	}
+}
+
+// TestParseSizeEnv cannot run in parallel: t.Setenv panics when called from
+// a parallel test.
+func TestParseSizeEnv(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+
+	const fallback = 42
+
+	cases := map[string]struct {
+		raw  string
+		want int64
+	}{
+		"empty":      {raw: "", want: fallback},
+		"bytes":      {raw: "1024", want: 1024},
+		"byte unit":  {raw: "512B", want: 512},
+		"kibibytes":  {raw: "256KiB", want: 256 << 10},
+		"mebibytes":  {raw: "16 MiB", want: 16 << 20},
+		"gibibytes":  {raw: "1GiB", want: 1 << 30},
+		"not a size": {raw: "large", want: fallback},
+		"bad unit":   {raw: "16MB", want: fallback},
+		"overflowed": {raw: "9999999999GiB", want: fallback},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			const envVar = "TEST_PARSE_SIZE_ENV"
+
+			t.Setenv(envVar, testCase.raw)
+
+			assert.Equal(t, testCase.want, parseSizeEnv(logger, envVar, fallback))
+		})
+	}
+}
+
+// TestSpeedtestOptions cannot run in parallel: t.Setenv panics when called
+// from a parallel test.
+//
+//nolint:paralleltest
+func TestSpeedtestOptions(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("defaults", func(t *testing.T) {
+		client, err := speedtest.New(speedtestOptions(logger)...)
+		require.NoError(t, err)
+		assert.NotNil(t, client)
+	})
+
+	t.Run("overrides", func(t *testing.T) {
+		t.Setenv("SPEEDTEST_STREAMS", "8")
+		t.Setenv("SPEEDTEST_DOWNLOAD_SIZE", "2000")
+		t.Setenv("SPEEDTEST_UPLOAD_SIZE", "64MiB")
+		t.Setenv("SPEEDTEST_DURATION", "20s")
+
+		_, err := speedtest.New(speedtestOptions(logger)...)
+		require.NoError(t, err)
+	})
+
+	t.Run("rejected by library", func(t *testing.T) {
+		t.Setenv("SPEEDTEST_DOWNLOAD_SIZE", "1234")
+
+		_, err := speedtest.New(speedtestOptions(logger)...)
+		require.ErrorIs(t, err, speedtest.ErrInvalidOption)
+	})
+}
+
 func TestAppRevalidate(t *testing.T) {
 	t.Parallel()
 
@@ -158,10 +250,10 @@ func TestAppRevalidate(t *testing.T) {
 		metrics:           NewMetrics(reg),
 		prometheusHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
 		scrapeTimeout:     time.Second,
-		runSpeedtest: func(_ context.Context) (*speedtest.Server, time.Duration, error) {
+		runSpeedtest: func(_ context.Context) (*speedtest.Result, error) {
 			calls.Add(1)
 
-			return nil, 0, errStubSpeedtestFailure
+			return nil, errStubSpeedtestFailure
 		},
 	}
 
@@ -194,10 +286,10 @@ func TestAppRunRevalidatesPeriodically(t *testing.T) {
 		prometheusHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
 		scrapeInterval:    10 * time.Millisecond,
 		scrapeTimeout:     time.Second,
-		runSpeedtest: func(_ context.Context) (*speedtest.Server, time.Duration, error) {
+		runSpeedtest: func(_ context.Context) (*speedtest.Result, error) {
 			calls.Add(1)
 
-			return nil, 0, errStubSpeedtestFailure
+			return nil, errStubSpeedtestFailure
 		},
 	}
 
@@ -233,25 +325,23 @@ func TestAppRecordResults(t *testing.T) {
 		prometheusHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
 	}
 
-	// speedtest.ByteRate is bytes/s; Mbps() divides by 125000, so multiply
-	// back to construct a fixture in Mbps.
-	const bytesPerSecondPerMbps = 125000
+	const mbps = 1e6
 
-	target := &speedtest.Server{
-		Latency: 50 * time.Millisecond,
-		Jitter:  5 * time.Millisecond,
-		DLSpeed: 100 * bytesPerSecondPerMbps,
-		ULSpeed: 20 * bytesPerSecondPerMbps,
+	result := &speedtest.Result{
+		Latency:  speedtest.Latency{Mean: 50 * time.Millisecond, Jitter: 5 * time.Millisecond},
+		Download: speedtest.Throughput{BitsPerSecond: 100 * mbps},
+		Upload:   speedtest.Throughput{BitsPerSecond: 20 * mbps},
+		Duration: 2 * time.Second,
 	}
 
-	application.recordResults(target, 2*time.Second)
+	application.recordResults(result)
 
 	const delta = 1e-9
 
 	assert.InDelta(t, 0.05, testutil.ToFloat64(application.metrics.ping), delta)
 	assert.InDelta(t, 0.005, testutil.ToFloat64(application.metrics.jitter), delta)
-	assert.InDelta(t, 100*mbpsToBps, testutil.ToFloat64(application.metrics.downloadSpeed), delta)
-	assert.InDelta(t, 20*mbpsToBps, testutil.ToFloat64(application.metrics.uploadSpeed), delta)
+	assert.InDelta(t, 100*mbps, testutil.ToFloat64(application.metrics.downloadSpeed), delta)
+	assert.InDelta(t, 20*mbps, testutil.ToFloat64(application.metrics.uploadSpeed), delta)
 	assert.InDelta(t, 1, testutil.ToFloat64(application.metrics.resultValid), delta)
 	assert.InDelta(t, 2, testutil.ToFloat64(application.metrics.testDuration), delta)
 	assert.InDelta(t, 1, testutil.ToFloat64(application.metrics.up), delta)

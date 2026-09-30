@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nicklasfrahm-dev/prometheus-speedtest-exporter/pkg/speedtest"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -45,6 +46,21 @@ func waitForShutdown(logger *slog.Logger, server *http.Server) error {
 	return nil
 }
 
+// newServer returns an HTTP server listening on addr that routes requests to
+// application's handlers.
+func newServer(addr string, application *app) *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/metrics", application.handleMetrics)
+	mux.HandleFunc("/livez", application.handleLivez)
+	mux.HandleFunc("/readyz", application.handleReadyz)
+
+	return &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+}
+
 func main() {
 	logger := newLogger()
 
@@ -56,6 +72,12 @@ func main() {
 	scrapeInterval := parseDurationEnv(logger, "SCRAPE_INTERVAL", defaultScrapeInterval)
 	scrapeTimeout := parseDurationEnv(logger, "SCRAPE_TIMEOUT", defaultScrapeTimeout)
 
+	speedtestClient, err := speedtest.New(speedtestOptions(logger)...)
+	if err != nil {
+		logger.Error("Failed to create speedtest client", "error", err)
+		os.Exit(1)
+	}
+
 	baseCtx, cancelBaseCtx := context.WithCancel(context.Background())
 
 	reg := prometheus.NewRegistry()
@@ -66,19 +88,10 @@ func main() {
 		prometheusHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
 		scrapeInterval:    scrapeInterval,
 		scrapeTimeout:     scrapeTimeout,
-		runSpeedtest:      runFullSpeedtest,
+		runSpeedtest:      speedtestClient.Run,
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/metrics", application.handleMetrics)
-	mux.HandleFunc("/livez", application.handleLivez)
-	mux.HandleFunc("/readyz", application.handleReadyz)
-
-	server := &http.Server{
-		Addr:              port,
-		Handler:           mux,
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
+	server := newServer(port, application)
 
 	logger.Info("Starting application", "application", "prometheus-speedtest-exporter", "version", version)
 
@@ -94,7 +107,7 @@ func main() {
 		}
 	}()
 
-	err := waitForShutdown(logger, server)
+	err = waitForShutdown(logger, server)
 
 	cancelBaseCtx()
 
