@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.26-trixie AS build
+FROM golang:1.27-trixie AS build
 ARG VERSION
 
 WORKDIR /app
@@ -9,6 +9,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 ADD Makefile .
 ADD cmd/ cmd/
+ADD pkg/ pkg/
 RUN --mount=type=cache,target=/go/pkg/mod \
 	--mount=type=cache,target=/root/.cache/go-build \
 	VERSION=$VERSION BINARY=app make build
