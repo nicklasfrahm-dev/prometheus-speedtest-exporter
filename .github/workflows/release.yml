@@ -30,16 +30,19 @@ jobs:
         run: |
           # Only ever install npm releases that have had at least 15 days to
           # be caught by the community/be pulled in case of a supply chain
-          # compromise.
+          # compromise. Prereleases are skipped because they do not satisfy
+          # the plugins' peer dependency ranges, and the highest version is
+          # picked by semver rather than publish time so that backports to
+          # older major versions are never selected.
           cutoff="$(date -u -d '15 days ago' +%Y-%m-%dT%H:%M:%SZ)"
 
           resolve() {
             npm view "$1" time --json \
               | jq -r --arg cutoff "$cutoff" '
                   to_entries
-                  | map(select(.key != "created" and .key != "modified"))
+                  | map(select(.key | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")))
                   | map(select(.value <= $cutoff))
-                  | sort_by(.value)
+                  | sort_by(.key | split(".") | map(tonumber))
                   | last.key
                 '
           }
